@@ -1,1 +1,165 @@
-#TODO APPUSING FLASK
+
+import datetime
+
+from flask import Flask
+from flask_restx import Api, Resource, fields
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app)
+api = Api(app, version='1.0', title='TodoMVC API',
+    description='A simple TodoMVC API',
+)
+
+ns = api.namespace('todos', description='TODO operations')
+
+todo = api.model('Todo', {
+    'id': fields.Integer(readonly=True, description='The task unique identifier'),
+    'task': fields.String(required=True, description='The task details'),
+    'Due by': fields.Date(required=True, descriptions='Due Date'),
+    'Status': fields.String(required=True, description='Current Status'),
+})
+
+
+class TodoDAO(object):
+    def __init__(self):
+        self.counter = 0
+        self.todos = []
+
+    def get(self, id):
+        for todo in self.todos:
+            print(todo)
+            if todo['id'] == id:
+                return todo
+
+        api.abort(404, "Todo {} doesn't exist".format(id))
+
+    def get_list(self, due_date):
+        filtered_list = []
+        for todo in self.todos:
+            if todo['Due by'] == due_date:
+                filtered_list.append(todo)
+        return filtered_list
+
+    def get_overdue_list(self, over_due_date):
+        print(over_due_date)
+        filtered_list = []
+        for todo in self.todos:
+            print(todo['Due by'])
+            print(over_due_date)
+            if datetime.datetime.strptime(todo['Due by'],"%Y-%m-%d") > over_due_date:
+                filtered_list.append(todo)
+        return filtered_list
+
+    def get_status_list(self, status):
+        filtered_list = []
+
+        for todo in self.todos:
+
+            if todo['Status'] == status:
+                filtered_list.append(todo)
+        return filtered_list
+    def create(self, data):
+        todo = data
+        todo['id'] = self.counter = self.counter + 1
+        self.todos.append(todo)
+        return todo
+
+    def update(self, id, data):
+        todo = self.get(id)
+        todo.update(data)
+        return todo
+
+    def delete(self, id):
+        todo = self.get(id)
+        self.todos.remove(todo)
+
+
+DAO = TodoDAO()
+
+
+
+@ns.route('/')
+class TodoList(Resource):
+    '''Shows a list of all todos, and lets you POST to add new tasks'''
+    @ns.doc('list_todos')
+    @ns.marshal_list_with(todo)
+    def get(self):
+        '''List all tasks'''
+        return DAO.todos
+
+    @ns.doc('create_todo')
+    @ns.expect(todo)
+    @ns.marshal_with(todo, code=201)
+    def post(self):
+        '''Create a new task'''
+        return DAO.create(api.payload), 201
+
+
+
+@ns.route('/<string:due_date>')
+class TodoListByDueDate(Resource):
+    '''Shows a list of all todos By Due Date'''
+
+    @ns.doc('list_todos_by_due')
+    @ns.marshal_list_with(todo)
+    def get(self, due_date):
+        print(due_date)
+        '''List all tasks'''
+
+        return DAO.get_list(due_date)
+
+
+
+@ns.route('/overduedate/<string:over_due_date>')
+class TodoListByOverDueDate(Resource):
+    '''Shows a list of all todos By Over Due Date'''
+
+    @ns.doc('list_todos_by_over_due')
+    @ns.marshal_list_with(todo)
+    def get(self, over_due_date):
+        '''List all tasks'''
+
+        return DAO.get_overdue_list(datetime.datetime.strptime(over_due_date, "%Y-%m-%d"))
+
+@ns.route('/status/<string:status>')
+class TodoListByStatus(Resource):
+    '''Shows a list of all todos By Status'''
+
+    @ns.doc('list_todos_by_status')
+    @ns.marshal_list_with(todo)
+    def get(self, status):
+        print(status)
+        '''List all tasks'''
+
+        return DAO.get_status_list(status)
+
+
+@ns.route('/<int:id>')
+@ns.response(404, 'Todo not found')
+@ns.param('id', 'The task identifier')
+class Todo(Resource):
+    '''Show a single todo item and lets you delete them'''
+    @ns.doc('get_todo')
+    @ns.marshal_with(todo)
+    def get(self, id):
+        '''Fetch a given resource'''
+        return DAO.get(id)
+
+    @ns.doc('delete_todo')
+    @ns.response(204, 'Todo deleted')
+    def delete(self, id):
+        '''Delete a task given its identifier'''
+        DAO.delete(id)
+        return '', 204
+
+    @ns.expect(todo)
+    @ns.marshal_with(todo)
+    def put(self, id):
+        '''Update a task given its identifier'''
+        return DAO.update(id, api.payload)
+
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
